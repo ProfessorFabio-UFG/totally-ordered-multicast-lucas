@@ -222,7 +222,7 @@ def waitForLogsAndCompare(N_MSGS, numPeers):
                 unordered += 1
                 break
 
-    print(f'\n📊 TOTAL UNORDERED MESSAGES: {unordered} (de {N_MSGS})\n')
+    print(f'\n TOTAL UNORDERED MESSAGES: {unordered} (de {N_MSGS})\n')
 
 if __name__ == "__main__":
     mainLoop()

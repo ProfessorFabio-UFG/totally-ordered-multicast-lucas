@@ -32,39 +32,48 @@
 
 from socket import *
 import pickle
-from constMP import *
+from constMP import GROUPMNGR_TCP_PORT, PEER_TCP_PORT
 
 port = GROUPMNGR_TCP_PORT
-membership = []  # Agora, vai armazenar também o timestamp de Lamport de cada peer
+membership = []  # lista de (ip, port, lamport_clock)
 
 def serverLoop():
     serverSock = socket(AF_INET, SOCK_STREAM)
-    serverSock.bind(('0.0.0.0', port))
+    serverSock.setsockopt(SOL_SOCKET, SO_REUSEADDR, 1)
+    serverSock.bind(('0.0.0.0', GROUPMNGR_TCP_PORT))
     serverSock.listen(6)
-    
-    while(1):
-        (conn, addr) = serverSock.accept()
+    print(f'Group Manager listening on port {GROUPMNGR_TCP_PORT}...')
+
+    while True:
+        conn, addr = serverSock.accept()
         msgPack = conn.recv(2048)
         req = pickle.loads(msgPack)
-        
-        # Registro de peer
+
         if req["op"] == "register":
             ipaddr = req["ipaddr"]
             peer_port = req["port"]
-            lamport_clock = req["lamport_clock"]  # Novo campo para o relógio lógico
-            
-            membership.append((ipaddr, peer_port, lamport_clock))
-            print('Registered peer: ', req)
-        
-        # Listar peers
+            lamport_clock = req.get("lamport_clock", 0)
+            exists = any(m[0] == ipaddr and m[1] == peer_port for m in membership)
+            if not exists:
+                membership.append((ipaddr, peer_port, lamport_clock))
+                print('Registered peer:', req)
+            else:
+                print('Peer already registered:', req)
+
         elif req["op"] == "list":
-            peer_list = [(m[0], m[1]) for m in membership]  # Inclui apenas IP e porta
-            print('List of peers sent to server: ', peer_list)
+            peer_list = []
+            seen = set()
+            for m in membership:
+                ip, port, _ = m
+                if port >= PEER_TCP_PORT and ip not in seen:
+                    peer_list.append((ip, port))
+                    seen.add(ip)
+            print('List of peers sent:', peer_list)
             conn.send(pickle.dumps(peer_list))
-        
+
         else:
-            pass  # Responder com erro caso operação desconhecida
+            print('Unknown operation:', req["op"])
 
         conn.close()
 
-serverLoop()
+if __name__ == "__main__":

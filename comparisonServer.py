@@ -159,81 +159,70 @@
 from socket import *
 import pickle
 from constMP import *
-import time
-import sys
 
 serverSock = socket(AF_INET, SOCK_STREAM)
+serverSock.setsockopt(SOL_SOCKET, SO_REUSEADDR, 1)
 serverSock.bind(('0.0.0.0', SERVER_PORT))
 serverSock.listen(6)
 
 def mainLoop():
-    cont = 1
-    while 1:
-        nMsgs = promptUser()
+    print(f'Comparison Server listening on port {SERVER_PORT}')
+    while True:
+        nMsgs = int(input('Enter number of messages for each peer to send (0 to exit): '))
         if nMsgs == 0:
             break
+
         clientSock = socket(AF_INET, SOCK_STREAM)
         clientSock.connect((GROUPMNGR_ADDR, GROUPMNGR_TCP_PORT))
         req = {"op": "list"}
-        msg = pickle.dumps(req)
-        clientSock.send(msg)
+        clientSock.send(pickle.dumps(req))
         msg = clientSock.recv(2048)
         clientSock.close()
         peerList = pickle.loads(msg)
-        print("List of Peers: ", peerList)
+        print('Peers:', peerList)
+
         startPeers(peerList, nMsgs)
-        print('Now, wait for the message logs from the communicating peers...')
-        waitForLogsAndCompare(nMsgs)
+        print('Waiting for message logs from peers...')
+        waitForLogsAndCompare(nMsgs, len(peerList))
+
     serverSock.close()
 
-def promptUser():
-    nMsgs = int(input('Enter the number of messages for each peer to send (0 to terminate)=> '))
-    return nMsgs
-
 def startPeers(peerList, nMsgs):
-    # Connect to each of the peers and send the 'initiate' signal:
-    peerNumber = 0
-    for peer in peerList:
-        clientSock = socket(AF_INET, SOCK_STREAM)
-        clientSock.connect((peer, PEER_TCP_PORT))
-        msg = (peerNumber, nMsgs)
-        msgPack = pickle.dumps(msg)
-        clientSock.send(msgPack)
-        msgPack = clientSock.recv(512)
-        print(pickle.loads(msgPack))
-        clientSock.close()
-        peerNumber += 1
+    for peerNumber, peer in enumerate(peerList):
+        try:
+            clientSock = socket(AF_INET, SOCK_STREAM)
+            clientSock.connect((peer[0], peer[1]))
+            msg = (peerNumber, nMsgs)
+            clientSock.send(pickle.dumps(msg))
+            response = pickle.loads(clientSock.recv(512))
+            print(f'Peer {peerNumber} started: {response}')
+            clientSock.close()
+        except Exception as e:
+            print(f'Error starting peer {peerNumber} ({peer[0]}): {e}')
 
-def waitForLogsAndCompare(N_MSGS):
-    numPeers = 0
-    msgs = []  # List of message logs from the peers
-    lamportClocks = []  # List to store the Lamport clocks for each log
+def waitForLogsAndCompare(N_MSGS, numPeers):
+    numReceived = 0
+    lamportClocks = []
 
-    # Receive message logs from peers
-    while numPeers < N:
-        (conn, addr) = serverSock.accept()
+    while numReceived < numPeers:
+        conn, addr = serverSock.accept()
         msgPack = conn.recv(32768)
-        print('Received log from peer')
         conn.close()
         log_data = pickle.loads(msgPack)
-        lamportClocks.append([msg[0] for msg in log_data])  # Store Lamport timestamps
-        msgs.append(log_data)
-        numPeers += 1
+        lamportClocks.append([msg[0] for msg in log_data])  # timestamps
+        print(f'[+] Received log from peer {numReceived} ({addr[0]})')
+        numReceived += 1
 
+    print('[*] Comparing logs for total order...')
     unordered = 0
-
-    # Compare the message logs from different peers
-    for j in range(0, N_MSGS - 1):
-        firstMsg = msgs[0][j]  # The first message from peer 0
-        firstLamportClock = lamportClocks[0][j]  # Lamport clock of peer 0's message
-        for i in range(1, N - 1):
-            currentMsg = msgs[i][j]
-            currentLamportClock = lamportClocks[i][j]  # Lamport clock of current peer's message
-            if firstLamportClock != currentLamportClock:
-                unordered += 1  # If the timestamps don't match, there is disorder
+    for j in range(N_MSGS):
+        firstClock = lamportClocks[0][j]
+        for i in range(1, numPeers):
+            if lamportClocks[i][j] != firstClock:
+                unordered += 1
                 break
 
-    print(f'Found {unordered} unordered message rounds')
+    print(f'\n📊 TOTAL UNORDERED MESSAGES: {unordered} (de {N_MSGS})\n')
 
-# Initiate server:
-mainLoop()
+if __name__ == "__main__":
+    mainLoop()
